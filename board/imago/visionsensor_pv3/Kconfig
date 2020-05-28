@@ -1,0 +1,14 @@
+if TARGET_VISIONSENSOR_PV3
+
+config SYS_BOARD
+	default "visionsensor_pv3"
+
+config SYS_VENDOR
+	default "imago"
+
+config SYS_CONFIG_NAME
+	default "visionsensor_pv3"
+
+source "board/freescale/common/Kconfig"
+
+endif
