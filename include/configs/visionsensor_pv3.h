@@ -26,6 +26,9 @@
 #define CONFIG_SYS_MMCSD_FS_BOOT_PARTITION	1
 #define CONFIG_SYS_UBOOT_BASE		(QSPI0_AMBA_BASE + CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_SECTOR * 512)
 
+
+/* SPL -> */
+
 #ifdef CONFIG_SPL_BUILD
 /*#define CONFIG_ENABLE_DDR_TRAINING_DEBUG*/
 #define CONFIG_SPL_WATCHDOG_SUPPORT
@@ -61,10 +64,14 @@
 #define CONFIG_SYS_I2C_MXC_I2C1		/* enable I2C bus 1 */
 #define CONFIG_SYS_I2C_MXC_I2C2		/* enable I2C bus 2 */
 #define CONFIG_SYS_I2C_MXC_I2C3		/* enable I2C bus 3 */
+#define CONFIG_SYS_I2C_MXC_I2C4		/* enable I2C bus 4 */
 
 #define CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG
 
 #endif
+
+/* <- SPL */
+
 
 #define CONFIG_CMD_READ
 #define CONFIG_SERIAL_TAG
@@ -73,9 +80,6 @@
 #define CONFIG_REMAKE_ELF
 
 #define CONFIG_BOARD_EARLY_INIT_F
-
-/* Flat Device Tree Definitions */
-#define CONFIG_OF_BOARD_SETUP
 
 /*#undef CONFIG_CMD_EXPORTENV
 #undef CONFIG_CMD_IMPORTENV
@@ -202,7 +206,7 @@
 
 #define CONFIG_SYS_SDRAM_BASE           0x40000000
 #define PHYS_SDRAM                      0x40000000
-#define PHYS_SDRAM_SIZE			0x40000000 /* 1 GB DDR */
+#define PHYS_SDRAM_SIZE			0x80000000 /* 2 GB DDR */
 #define CONFIG_NR_DRAM_BANKS		1
 
 #define CONFIG_SYS_MEMTEST_START    PHYS_SDRAM
@@ -300,4 +304,5 @@
 /*#if defined(CONFIG_ANDROID_SUPPORT)
 #include "imx8mm_evk_android.h"
 #endif*/
+
 #endif

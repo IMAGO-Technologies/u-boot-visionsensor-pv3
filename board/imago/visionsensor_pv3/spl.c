@@ -1,13 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2018-2019 NXP
+ * spl.c
  *
+ * Copyright (C) IMAGO Technologies GmbH - <https://www.imago-technologies.com>
+ *
+ * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>
 #include <spl.h>
 #include <asm/io.h>
 #include <errno.h>
+#include <bloblist.h>
 #include <asm/io.h>
 #include <asm/mach-imx/iomux-v3.h>
 #include <asm/arch/imx8mm_pins.h>
@@ -20,16 +23,151 @@
 #include <fsl_esdhc.h>
 #include <mmc.h>
 #include <asm/arch/ddr.h>
+#include "vspv3_board.h"
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#define GPIO1_7 IMX_GPIO_NR(1, 7)
+#define GPIO1_8 IMX_GPIO_NR(1, 8)
+#define GPIO1_9 IMX_GPIO_NR(1, 9)
+
+static int get_board_type(void)
+{
+	int result;
+	unsigned char type = 0;
+	
+	gpio_request(GPIO1_7, "gpio1 7");
+	gpio_request(GPIO1_8, "gpio1 8");
+	gpio_request(GPIO1_9, "gpio1 9");
+	gpio_direction_input(GPIO1_7);
+	gpio_direction_input(GPIO1_8);
+	gpio_direction_input(GPIO1_9);
+
+	result = gpio_get_value(GPIO1_7);
+	if (result < 0) {
+		printf("%s: error reading GPIO1_7\n", __func__);
+		return -1;
+	}
+	type |= result;
+	
+	result = gpio_get_value(GPIO1_8);
+	if (result < 0) {
+		printf("%s: error reading GPIO1_8\n", __func__);
+		return -1;
+	}
+	type |= (result << 1);
+
+	result = gpio_get_value(GPIO1_9);
+	if (result < 0) {
+		printf("%s: error reading GPIO1_9\n", __func__);
+		return -1;
+	}
+	type |= (result << 2);
+	
+	return type;
+}
+
+static int get_board_config(void)
+{
+	const unsigned char chip_addr = 0x43;
+	unsigned char buf = 0;
+
+	i2c_set_bus_num(3);
+	i2c_init(CONFIG_SYS_I2C_SPEED, CONFIG_SYS_I2C_SLAVE);
+	if (i2c_probe(chip_addr)) {
+		return -1;
+	}
+
+	// read device id
+	if (i2c_read(chip_addr, 0x01, 1, &buf, 1)) {
+		return -1;
+	}
+	if ((buf & 0x40) != 0x40) {
+		return -1;
+	}
+
+	// select Pull-Up
+	buf = 0xff;
+	if (i2c_write(chip_addr, 0x0d, 1, &buf, 1)) {
+		return -1;
+	}
+
+	// enable Pull-Up
+	buf = 0xff;
+	if (i2c_write(chip_addr, 0x0b, 1, &buf, 1)) {
+		return -1;
+	}
+
+	// wait for stable signal
+	udelay(100);
+
+	// read intput state
+	if (i2c_read(chip_addr, 0x0f, 1, &buf, 1)) {
+		return -1;
+	}
+
+	return buf;
+}
+
+extern struct dram_timing_info dram_timing_2gb;
+
 void spl_dram_init(void)
 {
-	ddr_init(&dram_timing);
+	int has2gb = 0;
+	phys_size_t ram_size = 0x40000000;
+	int board_type = get_board_type();
+	struct BloblistInfo *pBloblistInfo;
+	int board_cfg = 0;
+
+	switch (board_type) {
+		case BOARD_TYPE_VSPV3_revA:
+			printf("Board: LK1193 rev.A\n");
+			// GPIO expander doesn't work for rev. A, just return with known value:
+			board_cfg = 0x21;
+			break;
+		case BOARD_TYPE_VSPV3:
+			printf("Board: LK1193\n");
+			board_cfg = get_board_config();
+			break;
+		case BOARD_TYPE_VSPV3_5MP:
+			printf("Board: LK1203\n");
+			board_cfg = get_board_config();
+			break;
+		default:
+			printf("Board: unknown (%d)\n", board_type);
+			board_cfg = 0x21;
+			break;
+	}
+
+	/* read RAM size from GPIO expander */
+	if (board_cfg < 0)
+		printf("Error reading GPIO expander, assuming 1 GB RAM configuration.\n");
+	else
+		has2gb = (board_cfg & 0x01) == 0;
+
+	/* RAM initialization */
+	if (has2gb) {
+		ram_size = 0x80000000;
+		ddr_init(&dram_timing_2gb);
+	} else {
+		ddr_init(&dram_timing);
+	}
+
+	/* store memory size in bloblist for regular U-Boot */
+	pBloblistInfo = bloblist_add(4711, sizeof(*pBloblistInfo));
+	if (pBloblistInfo == NULL) {
+		printf("Error adding bloblist.\n");
+	}
+	else {
+		pBloblistInfo->ram_size = ram_size;
+		pBloblistInfo->board_type = board_type;
+		pBloblistInfo->board_cfg = board_cfg;
+	}
 }
 
 #define I2C_PAD_CTRL	(PAD_CTL_DSE6 | PAD_CTL_HYS | PAD_CTL_PUE | PAD_CTL_PE)
 #define PC MUX_PAD_CTRL(I2C_PAD_CTRL)
+/* I2C1 */
 struct i2c_pads_info i2c_pad_info1 = {
 	.scl = {
 		.i2c_mode = IMX8MM_PAD_I2C1_SCL_I2C1_SCL | PC,
@@ -40,6 +178,20 @@ struct i2c_pads_info i2c_pad_info1 = {
 		.i2c_mode = IMX8MM_PAD_I2C1_SDA_I2C1_SDA | PC,
 		.gpio_mode = IMX8MM_PAD_I2C1_SDA_GPIO5_IO15 | PC,
 		.gp = IMX_GPIO_NR(5, 15),
+	},
+};
+
+/* I2C4 */
+struct i2c_pads_info i2c_pad_info4 = {
+	.scl = {
+		.i2c_mode = IMX8MM_PAD_I2C4_SCL_I2C4_SCL | PC | ((iomux_v3_cfg_t)(IOMUX_CONFIG_SION) << MUX_MODE_SHIFT),
+		.gpio_mode = IMX8MM_PAD_I2C4_SCL_GPIO5_IO20 | PC,
+		.gp = IMX_GPIO_NR(5, 20),
+	},
+	.sda = {
+		.i2c_mode = IMX8MM_PAD_I2C4_SDA_I2C4_SDA | PC | ((iomux_v3_cfg_t)(IOMUX_CONFIG_SION) << MUX_MODE_SHIFT),
+		.gpio_mode = IMX8MM_PAD_I2C4_SDA_GPIO5_IO21 | PC,
+		.gp = IMX_GPIO_NR(5, 21),
 	},
 };
 
@@ -88,6 +240,12 @@ static iomux_v3_cfg_t const usdhc2_dat3_pad =
 static struct fsl_esdhc_cfg usdhc_cfg[2] = {
 	{USDHC2_BASE_ADDR, 0, 1},
 	{USDHC3_BASE_ADDR, 0, 1},
+};
+
+ static iomux_v3_cfg_t const gpio_pads[] = {
+	IMX8MM_PAD_GPIO1_IO07_GPIO1_IO7 | MUX_PAD_CTRL(PAD_CTL_PUE | PAD_CTL_PE),
+	IMX8MM_PAD_GPIO1_IO08_GPIO1_IO8 | MUX_PAD_CTRL(PAD_CTL_PE),
+	IMX8MM_PAD_GPIO1_IO09_GPIO1_IO9 | MUX_PAD_CTRL(PAD_CTL_PE),
 };
 
 int board_mmc_init(bd_t *bis)
@@ -240,11 +398,16 @@ void board_init_f(ulong dummy)
 		hang();
 	}
 
+	imx_iomux_v3_setup_multiple_pads(gpio_pads, ARRAY_SIZE(gpio_pads));
+
 	// TrustZone
 	enable_tzc380();
 
 	/* Adjust pmic voltage to 1.0V for 800M */
 	setup_i2c(0, CONFIG_SYS_I2C_SPEED, 0x7f, &i2c_pad_info1);
+	setup_i2c(3, CONFIG_SYS_I2C_SPEED, 0x7f, &i2c_pad_info4);
+
+	i2c_set_bus_num(0);
 
 	power_init_board();
 
