@@ -140,9 +140,9 @@
 		"fi;\0" \
 	"mmcdev="__stringify(CONFIG_SYS_MMC_ENV_DEV)"\0" \
 	"mmcpart=" __stringify(CONFIG_SYS_MMC_IMG_LOAD_PART) "\0" \
-	"mmcroot=/dev/mmcblk1p2 rootwait rw\0" \
+	"mmcroot=/dev/mmcblk0p2 rootwait rw\0" \
 	"mmcautodetect=yes\0" \
-	"mmcargs=setenv bootargs ${jh_clk} console=${console} root=${mmcroot}\0 " \
+	"mmcargs=setenv bootargs console=${console} quiet root=${mmcroot}\0 " \
 	"loadbootscript=if test -e mmc ${mmcdev}:${mmcpart} ${script}; then " \
 			"load mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script}; " \
 		"fi;\0" \
@@ -157,7 +157,7 @@
 			"unzip ${loadaddr} 0x50000000; " \
 			"booti 0x50000000 - ${fdt_addr}; " \
 		"fi;\0" \
-	"netargs=setenv bootargs ${jh_clk} console=${console} " \
+	"netargs=setenv bootargs console=${console} quiet " \
 		"root=/dev/nfs " \
 		"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0" \
 	"netboot=echo Booting from net ...; " \
