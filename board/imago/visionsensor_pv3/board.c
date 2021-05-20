@@ -186,6 +186,12 @@ static int tca7408_set_output(unsigned char value)
 	return 0;
 }
 
+#define PCIE_RST_PAD IMX_GPIO_NR(4, 21)
+
+static iomux_v3_cfg_t const pcie_rst_pads[] = {
+	IMX8MM_PAD_SAI2_RXFS_GPIO4_IO21 | MUX_PAD_CTRL(NO_PAD_CTRL),
+};
+
 static int setup_pcie(void *fdt)
 {
 	const char *path;
@@ -200,8 +206,15 @@ static int setup_pcie(void *fdt)
 	if (ret < 0)
 		return ret;
 	if ((ret & 0x80) == 0) {
-		printf("   Enabling PCIe\n");
+		// pull PCIe reset low
+		imx_iomux_v3_setup_multiple_pads(pcie_rst_pads,
+						 ARRAY_SIZE(pcie_rst_pads));
+		gpio_request(PCIE_RST_PAD, "pcie_rst");
+		gpio_direction_output(PCIE_RST_PAD, 0);
+
+		// enable supply
 		tca7408_set_output(0x01);
+		printf("   PCIe enabled.\n");
 		fdt_val = "okay";
 	}
 	else
@@ -210,20 +223,95 @@ static int setup_pcie(void *fdt)
 	path = "/hsio/pcie@33800000";
 	offs = fdt_path_offset(fdt, path);
 	if (offs < 0) {
-		printf("Node %s not found.\n", path);
+		printf("%s(): node %s not found.\n", __func__, path);
 		return offs;
 	}
 
 	ret = fdt_setprop_string(fdt, offs, "status", fdt_val);
 	if (ret < 0) {
-		printf("libfdt fdt_setprop(): %s\n", fdt_strerror(ret));
+		printf("%s(): fdt_setprop_string(): %s\n", __func__, fdt_strerror(ret));
 		return ret;
 	}
+	
+	return 0;
+}
+
+static int disable_fpga(void *fdt)
+{
+	const char *path;
+	int offs, ret;
+
+	path = "/ecspi@30830000/imago-fpga@0";
+	offs = fdt_path_offset(fdt, path);
+	if (offs < 0) {
+		printf("%s(): node %s not found.\n", __func__, path);
+		return offs;
+	}
+
+	ret = fdt_setprop_string(fdt, offs, "status", "disabled");
+	if (ret < 0) {
+		printf("%s(): fdt_setprop_string(): %s\n", __func__, fdt_strerror(ret));
+		return ret;
+	}
+
+	printf("   FPGA disabled (SPI).\n");
+
+	return 0;
+}
+
+static int enable_usb(void *fdt)
+{
+	const char *path;
+	int offs, ret;
+
+	path = "/usb@32e40000";
+	offs = fdt_path_offset(fdt, path);
+	if (offs < 0) {
+		printf("%s(): node %s not found.\n", __func__, path);
+		return offs;
+	}
+
+	ret = fdt_setprop_string(fdt, offs, "status", "okay");
+	if (ret < 0) {
+		printf("%s(): fdt_setprop_string(): %s\n", __func__, fdt_strerror(ret));
+		return ret;
+	}
+
+	printf("   USB enabled.\n");
+
+	return 0;
+}
+
+static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_settle)
+{
+	const char *path;
+	int offs, ret;
+
+	path = "/mipi_csi@32e30000/port/endpoint@1";
+	offs = fdt_path_offset(fdt, path);
+	if (offs < 0) {
+		printf("%s(): node %s not found.\n", __func__, path);
+		return offs;
+	}
+
+	ret = fdt_setprop_u32(fdt, offs, "data-lanes", lanes);
+	if (ret < 0) {
+		printf("%s(): fdt_setprop_u32(): %s\n", __func__, fdt_strerror(ret));
+		return ret;
+	}
+	ret = fdt_setprop_u32(fdt, offs, "csis-hs-settle", clk_hs_settle);
+	if (ret < 0) {
+		printf("%s(): fdt_setprop_u32(): %s\n", __func__, fdt_strerror(ret));
+		return ret;
+	}
+
+	printf("   MIPI CSI: %u lanes, clk_hs_settle = %u.\n", lanes, clk_hs_settle);
 
 	return 0;
 }
 
 #ifdef CONFIG_OF_BOARD_SETUP
+int ToggleTRST(int toggle);
 int ft_board_setup(void *fdt, bd_t *bd)
 {
 	struct BloblistInfo *pBloblistInfo;
@@ -235,8 +323,30 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		return 0;
 	}
 
-	if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_5MP)
+	if (pBloblistInfo->board_cfg & BOARD_CFG_PCIE_M2)
 		setup_pcie(fdt);
+
+	if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_JMS)
+	{
+		const char *path;
+		int offs, ret;
+
+		disable_fpga(fdt);
+		enable_usb(fdt);
+		setup_mipi_csi(fdt, 4, 8);
+
+		path = "/csi1_bridge@32e20000";
+		offs = fdt_path_offset(fdt, path);
+		if (offs < 0) {
+			printf("%s(): node %s not found.\n", __func__, path);
+		}
+		else {
+			ret = fdt_setprop_empty(fdt, offs, "imago,event-mode");
+			if (ret < 0) {
+				printf("%s(): fdt_setprop_empty(): %s\n", __func__, fdt_strerror(ret));
+			}
+		}
+	}
 
 	return 0;
 }
@@ -328,7 +438,21 @@ static void board_set_ethaddr(void)
 
 int board_late_init(void)
 {
+	struct BloblistInfo *pBloblistInfo;
 	board_set_ethaddr();
+
+	/* get bloblist stored by SPL */
+	pBloblistInfo = bloblist_find(4711, sizeof(*pBloblistInfo));
+	if (pBloblistInfo == NULL) {
+		printf("Error reading bloblist info from SPL.\n");
+		return 0;
+	}
+
+	if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_JMS)
+	{
+		printf("Loading sensor FPGA...\n");
+		fpga_init("/jms_sensor.iea", "/jms_sensor.ied");
+	}
 
 	return 0;
 }

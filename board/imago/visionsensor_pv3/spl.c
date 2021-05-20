@@ -123,7 +123,7 @@ void spl_dram_init(void)
 		case BOARD_TYPE_VSPV3_revA:
 			printf("Board: LK1193 rev.A\n");
 			// GPIO expander doesn't work for rev. A, just return with known value:
-			board_cfg = 0x21;
+			board_cfg = BOARD_CFG_1GB;
 			break;
 		case BOARD_TYPE_VSPV3:
 			printf("Board: LK1193\n");
@@ -133,9 +133,13 @@ void spl_dram_init(void)
 			printf("Board: LK1203\n");
 			board_cfg = get_board_config();
 			break;
+		case BOARD_TYPE_VSPV3_JMS:
+			printf("Board: LK1196\n");
+			board_cfg = BOARD_CFG_2GB;
+			break;
 		default:
 			printf("Board: unknown (%d)\n", board_type);
-			board_cfg = 0x21;
+			board_cfg = BOARD_CFG_1GB;
 			break;
 	}
 
