@@ -135,6 +135,7 @@
 	"fdt_file=" CONFIG_DEFAULT_FDT_FILE "\0" \
 	"initrd_addr=0x43800000\0"		\
 	"initrd_high=0xffffffffffffffff\0" \
+	"initrd_file=initrd.img\0" \
 	"loadbootenv=if test -e mmc ${mmcdev}:${mmcpart} uEnv.txt; then " \
 			"load mmc ${mmcdev}:${mmcpart} ${loadaddr} uEnv.txt; " \
 		"fi;\0" \
@@ -142,7 +143,7 @@
 	"mmcpart=" __stringify(CONFIG_SYS_MMC_IMG_LOAD_PART) "\0" \
 	"mmcroot=/dev/mmcblk0p2 rootwait rw\0" \
 	"mmcautodetect=yes\0" \
-	"mmcargs=setenv bootargs console=${console} quiet root=${mmcroot}\0 " \
+	"mmcargs=setenv bootargs ${optargs} console=${console} quiet root=${mmcroot} fsck.repair=yes\0 " \
 	"loadbootscript=if test -e mmc ${mmcdev}:${mmcpart} ${script}; then " \
 			"load mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script}; " \
 		"fi;\0" \
@@ -150,12 +151,17 @@
 		"source\0" \
 	"loadimage=load mmc ${mmcdev}:${mmcpart} ${loadaddr} ${bootfile}\0" \
 	"loadfdt=load mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}\0" \
+	"loadinitrd=if test -n ${initrd_file}; then if test -e mmc ${mmcdev}:${mmcpart} ${initrd_file}; then " \
+			"echo Loading ${initrd_file}; " \
+			"load mmc ${mmcdev}:${mmcpart} ${initrd_addr} ${initrd_file}; " \
+		"fi; fi;\0" \
 	"mmcboot=echo Booting from SD card...; " \
 		"if run loadimage; then " \
 			"run mmcargs; " \
 			"run loadfdt; " \
 			"unzip ${loadaddr} 0x50000000; " \
-			"booti 0x50000000 - ${fdt_addr}; " \
+			"if run loadinitrd; then booti 0x50000000 ${initrd_addr}:${filesize} ${fdt_addr}; " \
+			"else booti 0x50000000 - ${fdt_addr}; fi;" \
 		"fi;\0" \
 	"netargs=setenv bootargs console=${console} quiet " \
 		"root=/dev/nfs " \
