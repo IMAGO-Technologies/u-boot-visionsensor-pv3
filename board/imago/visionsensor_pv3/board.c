@@ -102,16 +102,6 @@ static int tca7408_init(void)
 		return -1;
 	}
 
-	// read device id
-	if (dm_i2c_read(dev, 0x01, &buf, 1)) {
-		printf("%s: error reading device id\n", __func__);
-		return -1;
-	}
-	if ((buf & 0x40) != 0x40) {
-		printf("%s: invalid device id\n", __func__);
-		return -1;
-	}
-
 	// Pull-Up/-Down select
 	buf = 0x80;
 	if (dm_i2c_write(dev, 0x0d, &buf, 1)) {
@@ -384,20 +374,31 @@ static int setup_fec(void)
 
 int board_phy_config(struct phy_device *phydev)
 {
-	/* enable rgmii rxc skew and phy mode select to RGMII copper */
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x1d, 0x1f);
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x1e, 0x8);
-
-	// rgmii rx clock delay enable
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x1d, 0x00);
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x1e, 0x82ee);
+	unsigned short phy_id = phy_read(phydev, MDIO_DEVAD_NONE, 0x2);
 	
-	// rgmii tx clock delay enable
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x1d, 0x05);
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x1e, 0x100);
+	if (phy_id == 0x283)	// ADIN1300
+	{
+		// LED_0 configuration: blink on activity
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1b, 0x0401);	// LED_CTRL_1.LED_A_EXT_CFG_EN = 1
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1c, 0x2109);	// LED_CTRL_2.LED_A_CFG = 0x9
+	}
+	else // if (phy_id == 0x4d)	// AR8031
+	{
+		/* enable rgmii rxc skew and phy mode select to RGMII copper */
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1d, 0x1f);
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1e, 0x8);
 
-	// LED_ACT: active
-	phy_write(phydev, MDIO_DEVAD_NONE, 0x19, 0x2000);
+		// rgmii rx clock delay enable
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1d, 0x00);
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1e, 0x82ee);
+		
+		// rgmii tx clock delay enable
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1d, 0x05);
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x1e, 0x100);
+
+		// LED_ACT: active
+		phy_write(phydev, MDIO_DEVAD_NONE, 0x19, 0x2000);
+	}
 
 	if (phydev->drv->config)
 		phydev->drv->config(phydev);

@@ -78,14 +78,6 @@ static int get_board_config(void)
 		return -1;
 	}
 
-	// read device id
-	if (i2c_read(chip_addr, 0x01, 1, &buf, 1)) {
-		return -1;
-	}
-	if ((buf & 0x40) != 0x40) {
-		return -1;
-	}
-
 	// select Pull-Up
 	buf = 0xff;
 	if (i2c_write(chip_addr, 0x0d, 1, &buf, 1)) {
