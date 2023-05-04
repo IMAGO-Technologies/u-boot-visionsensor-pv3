@@ -176,6 +176,20 @@ static int tca7408_set_output(unsigned char value)
 	return 0;
 }
 
+
+static int fdt_find_and_setprop_string(void *fdt, const char *node, const char *prop, const char *val)
+{
+	int ret = fdt_find_and_setprop(fdt, node, prop, val, strlen(val)+1, 1);
+
+	if (ret < 0)
+		printf("   dtb: error setting property %s/%s = \"%s\"\n", node, prop, val);
+	else
+		printf("   dtb: setting property %s/%s = \"%s\"\n", node, prop, val);
+
+	return ret;
+}
+
+
 #define PCIE_RST_PAD IMX_GPIO_NR(4, 21)
 
 static iomux_v3_cfg_t const pcie_rst_pads[] = {
@@ -184,8 +198,6 @@ static iomux_v3_cfg_t const pcie_rst_pads[] = {
 
 static int setup_pcie(void *fdt)
 {
-	const char *path;
-	int offs;
 	int ret = tca7408_init();
 	const char *fdt_val = "disabled";
 	
@@ -204,72 +216,13 @@ static int setup_pcie(void *fdt)
 
 		// enable supply
 		tca7408_set_output(0x01);
-		printf("   PCIe enabled.\n");
+		printf("   M.2 supply enabled.\n");
 		fdt_val = "okay";
 	}
 	else
 		tca7408_set_output(0x00);
 
-	path = "/hsio/pcie@33800000";
-	offs = fdt_path_offset(fdt, path);
-	if (offs < 0) {
-		printf("%s(): node %s not found.\n", __func__, path);
-		return offs;
-	}
-
-	ret = fdt_setprop_string(fdt, offs, "status", fdt_val);
-	if (ret < 0) {
-		printf("%s(): fdt_setprop_string(): %s\n", __func__, fdt_strerror(ret));
-		return ret;
-	}
-	
-	return 0;
-}
-
-static int disable_fpga(void *fdt)
-{
-	const char *path;
-	int offs, ret;
-
-	path = "/ecspi@30830000/imago-fpga@0";
-	offs = fdt_path_offset(fdt, path);
-	if (offs < 0) {
-		printf("%s(): node %s not found.\n", __func__, path);
-		return offs;
-	}
-
-	ret = fdt_setprop_string(fdt, offs, "status", "disabled");
-	if (ret < 0) {
-		printf("%s(): fdt_setprop_string(): %s\n", __func__, fdt_strerror(ret));
-		return ret;
-	}
-
-	printf("   FPGA disabled (SPI).\n");
-
-	return 0;
-}
-
-static int enable_usb(void *fdt)
-{
-	const char *path;
-	int offs, ret;
-
-	path = "/usb@32e40000";
-	offs = fdt_path_offset(fdt, path);
-	if (offs < 0) {
-		printf("%s(): node %s not found.\n", __func__, path);
-		return offs;
-	}
-
-	ret = fdt_setprop_string(fdt, offs, "status", "okay");
-	if (ret < 0) {
-		printf("%s(): fdt_setprop_string(): %s\n", __func__, fdt_strerror(ret));
-		return ret;
-	}
-
-	printf("   USB enabled.\n");
-
-	return 0;
+	return fdt_find_and_setprop_string(fdt, "/hsio/pcie@33800000", "status", fdt_val);
 }
 
 static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_settle)
@@ -301,7 +254,6 @@ static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_set
 }
 
 #ifdef CONFIG_OF_BOARD_SETUP
-int ToggleTRST(int toggle);
 int ft_board_setup(void *fdt, bd_t *bd)
 {
 	struct BloblistInfo *pBloblistInfo;
@@ -316,26 +268,41 @@ int ft_board_setup(void *fdt, bd_t *bd)
 	if (pBloblistInfo->board_cfg & BOARD_CFG_PCIE_M2)
 		setup_pcie(fdt);
 
-	if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_JMS)
-	{
+	if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_JMS) {
 		const char *path;
 		int offs, ret;
 
-		disable_fpga(fdt);
-		enable_usb(fdt);
+		fdt_find_and_setprop_string(fdt, "/ecspi@30830000/imago-fpga@0", "status", "disabled");
+		fdt_find_and_setprop_string(fdt, "/usb@32e40000", "status", "okay");
+
 		setup_mipi_csi(fdt, 4, 8);
 
 		path = "/csi1_bridge@32e20000";
 		offs = fdt_path_offset(fdt, path);
 		if (offs < 0) {
 			printf("%s(): node %s not found.\n", __func__, path);
-		}
-		else {
+		} else {
 			ret = fdt_setprop_empty(fdt, offs, "imago,event-mode");
 			if (ret < 0) {
 				printf("%s(): fdt_setprop_empty(): %s\n", __func__, fdt_strerror(ret));
 			}
 		}
+	} else if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_IMX296) {
+		// disable VPU / GPU (no power supply)
+		fdt_find_and_setprop_string(fdt, "/vpu_h1@38320000", "status", "disabled");
+		fdt_find_and_setprop_string(fdt, "/vpu_g1@38300000", "status", "disabled");
+		fdt_find_and_setprop_string(fdt, "/vpu_g2@38310000", "status", "disabled");
+		fdt_find_and_setprop_string(fdt, "/gpu@38000000", "status", "disabled");
+
+		// enable RTC
+		fdt_find_and_setprop_string(fdt, "/i2c@30a50000/rv8263@51", "status", "okay");
+
+		// enable temperature sensor and thermal zones
+		fdt_find_and_setprop_string(fdt, "/tmu@30260000", "status", "okay");
+		fdt_find_and_setprop_string(fdt, "/thermal-zones/cpu-thermal", "status", "okay");
+
+		// configure mipi lanes
+		setup_mipi_csi(fdt, 1, 26);
 	}
 
 	return 0;
@@ -378,9 +345,15 @@ int board_phy_config(struct phy_device *phydev)
 	
 	if (phy_id == 0x283)	// ADIN1300
 	{
-		// LED_0 configuration: blink on activity
-		phy_write(phydev, MDIO_DEVAD_NONE, 0x1b, 0x0401);	// LED_CTRL_1.LED_A_EXT_CFG_EN = 1
-		phy_write(phydev, MDIO_DEVAD_NONE, 0x1c, 0x2109);	// LED_CTRL_2.LED_A_CFG = 0x9
+		/* get bloblist stored by SPL */
+		struct BloblistInfo *pBloblistInfo = bloblist_find(4711, sizeof(*pBloblistInfo));
+		if (pBloblistInfo == NULL) {
+			printf("board_phy_config(): error reading bloblist info from SPL.\n");
+		} else if (pBloblistInfo->board_type != BOARD_TYPE_VSPV3_IMX296) {
+			// LED_0 configuration: blink on activity
+			phy_write(phydev, MDIO_DEVAD_NONE, 0x1b, 0x0401);	// LED_CTRL_1.LED_A_EXT_CFG_EN = 1
+			phy_write(phydev, MDIO_DEVAD_NONE, 0x1c, 0x2109);	// LED_CTRL_2.LED_A_CFG = 0x9
+		}
 	}
 	else // if (phy_id == 0x4d)	// AR8031
 	{

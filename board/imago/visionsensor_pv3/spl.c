@@ -101,65 +101,6 @@ static int get_board_config(void)
 	return buf;
 }
 
-extern struct dram_timing_info dram_timing_2gb;
-
-void spl_dram_init(void)
-{
-	int has2gb = 0;
-	phys_size_t ram_size = 0x40000000;
-	int board_type = get_board_type();
-	struct BloblistInfo *pBloblistInfo;
-	int board_cfg = 0;
-
-	switch (board_type) {
-		case BOARD_TYPE_VSPV3_revA:
-			printf("Board: LK1193 rev.A\n");
-			// GPIO expander doesn't work for rev. A, just return with known value:
-			board_cfg = BOARD_CFG_1GB;
-			break;
-		case BOARD_TYPE_VSPV3:
-			printf("Board: LK1193\n");
-			board_cfg = get_board_config();
-			break;
-		case BOARD_TYPE_VSPV3_5MP:
-			printf("Board: LK1203\n");
-			board_cfg = get_board_config();
-			break;
-		case BOARD_TYPE_VSPV3_JMS:
-			printf("Board: LK1196\n");
-			board_cfg = BOARD_CFG_2GB;
-			break;
-		default:
-			printf("Board: unknown (%d)\n", board_type);
-			board_cfg = BOARD_CFG_1GB;
-			break;
-	}
-
-	/* read RAM size from GPIO expander */
-	if (board_cfg < 0)
-		printf("Error reading GPIO expander, assuming 1 GB RAM configuration.\n");
-	else
-		has2gb = (board_cfg & 0x01) == 0;
-
-	/* RAM initialization */
-	if (has2gb) {
-		ram_size = 0x80000000;
-		ddr_init(&dram_timing_2gb);
-	} else {
-		ddr_init(&dram_timing);
-	}
-
-	/* store memory size in bloblist for regular U-Boot */
-	pBloblistInfo = bloblist_add(4711, sizeof(*pBloblistInfo));
-	if (pBloblistInfo == NULL) {
-		printf("Error adding bloblist.\n");
-	}
-	else {
-		pBloblistInfo->ram_size = ram_size;
-		pBloblistInfo->board_type = board_type;
-		pBloblistInfo->board_cfg = board_cfg;
-	}
-}
 
 #define I2C_PAD_CTRL	(PAD_CTL_DSE6 | PAD_CTL_HYS | PAD_CTL_PUE | PAD_CTL_PE)
 #define PC MUX_PAD_CTRL(I2C_PAD_CTRL)
@@ -314,10 +255,12 @@ int board_mmc_getcd(struct mmc *mmc)
 
 #ifdef CONFIG_POWER
 #define I2C_PMIC	0
-int power_init_board(void)
+static int vspv3_power_init()
 {
 	struct pmic *p;
 	int ret;
+
+	i2c_set_bus_num(0);
 
 	ret = power_bd71837_init(I2C_PMIC);
 	if (ret)
@@ -326,17 +269,16 @@ int power_init_board(void)
 	p = pmic_get("BD71837");
 	pmic_probe(p);
 
-
 	/* decrease RESET key long push time from the default 10s to 10ms */
 	pmic_reg_write(p, BD71837_PWRONCONFIG1, 0x0);
 
 	/* unlock the PMIC regs */
 	pmic_reg_write(p, BD71837_REGLOCK, 0x1);
 
-	/* increase VDD_SOC to typical value 0.82V (no PCIe, else 0.85V) before first DRAM access */
+	/* increase VDD_SOC to typical value 0.82V (0.85V with PCIe) before first DRAM access */
 	pmic_reg_write(p, BD71837_BUCK1_VOLT_RUN, 0x0c);
 
-	/* increase VDD_DRAM to 0.975v for 3Ghz DDR */
+	/* increase VDD_DRAM to 0.975V for 3Ghz DDR (0.95V is desired, 0.975V is the closest available setting) */
 	pmic_reg_write(p, BD71837_BUCK5_VOLT, 0x83);
 
 #ifndef CONFIG_IMX8M_LPDDR4
@@ -376,6 +318,12 @@ int board_fit_config_name_match(const char *name)
 void board_init_f(ulong dummy)
 {
 	int ret;
+	int has2gb = 0;
+	int board_type;
+	int board_cfg = 0;
+	unsigned int pcie_active = 0;
+	extern struct dram_timing_info dram_timing_2gb;
+	struct BloblistInfo *pBloblistInfo;
 
 	/* Clear the BSS. */
 	memset(__bss_start, 0, __bss_end - __bss_start);
@@ -399,16 +347,65 @@ void board_init_f(ulong dummy)
 	// TrustZone
 	enable_tzc380();
 
-	/* Adjust pmic voltage to 1.0V for 800M */
 	setup_i2c(0, CONFIG_SYS_I2C_SPEED, 0x7f, &i2c_pad_info1);
 	setup_i2c(3, CONFIG_SYS_I2C_SPEED, 0x7f, &i2c_pad_info4);
 
-	i2c_set_bus_num(0);
+	/* get board type and configuration */
+	board_type = get_board_type();
+	switch (board_type) {
+		case BOARD_TYPE_VSPV3_revA:
+			printf("Board: LK1193 rev.A\n");
+			// GPIO expander doesn't work for rev. A, just return with known value:
+			board_cfg = BOARD_CFG_1GB;
+			break;
+		case BOARD_TYPE_VSPV3:
+			printf("Board: LK1193\n");
+			board_cfg = get_board_config();
+			break;
+		case BOARD_TYPE_VSPV3_5MP:
+			printf("Board: LK1203\n");
+			board_cfg = get_board_config();
+			break;
+		case BOARD_TYPE_VSPV3_JMS:
+			printf("Board: LK1196\n");
+			board_cfg = BOARD_CFG_2GB;
+			break;
+		case BOARD_TYPE_VSPV3_IMX296:
+			printf("Board: LK1229\n");
+			board_cfg = BOARD_CFG_2GB;
+			break;
+		default:
+			printf("Board: unknown (%d)\n", board_type);
+			board_cfg = BOARD_CFG_1GB;
+			break;
+	}
 
-	power_init_board();
+	if (board_cfg < 0) {
+		printf("Error reading GPIO expander, assuming 1 GB RAM configuration.\n");
+	} else {
+		has2gb = (board_cfg & 0x01) == 0;
+	}
+
+
+	/* PMIC initialization */
+	vspv3_power_init();
+
 
 	/* DDR initialization */
-	spl_dram_init();
+	ddr_init(has2gb ? &dram_timing_2gb : &dram_timing);
+
+
+	/* store board configuration in bloblist for regular U-Boot */
+	pBloblistInfo = bloblist_add(4711, sizeof(*pBloblistInfo));
+	if (pBloblistInfo == NULL) {
+		printf("Error adding bloblist.\n");
+	}
+	else {
+		pBloblistInfo->ram_size = has2gb ? 0x80000000 : 0x40000000;
+		pBloblistInfo->board_type = board_type;
+		pBloblistInfo->board_cfg = board_cfg;
+	}
+
 
 	board_init_r(NULL, 0);
 }
