@@ -101,6 +101,24 @@ static int get_board_config(void)
 	return buf;
 }
 
+static int get_M2_gpio_input(void)
+{
+	const unsigned char chip_addr = 0x44;
+	unsigned char buf = 0;
+
+	i2c_set_bus_num(3);
+	if (i2c_probe(chip_addr)) {
+		return -1;
+	}
+
+	// read intput state
+	if (i2c_read(chip_addr, 0x0f, 1, &buf, 1)) {
+		return -1;
+	}
+
+	return buf;
+}
+
 
 #define I2C_PAD_CTRL	(PAD_CTL_DSE6 | PAD_CTL_HYS | PAD_CTL_PUE | PAD_CTL_PE)
 #define PC MUX_PAD_CTRL(I2C_PAD_CTRL)
@@ -255,7 +273,7 @@ int board_mmc_getcd(struct mmc *mmc)
 
 #ifdef CONFIG_POWER
 #define I2C_PMIC	0
-static int vspv3_power_init()
+static int vspv3_power_init(unsigned int pcie_active)
 {
 	struct pmic *p;
 	int ret;
@@ -276,7 +294,7 @@ static int vspv3_power_init()
 	pmic_reg_write(p, BD71837_REGLOCK, 0x1);
 
 	/* increase VDD_SOC to typical value 0.82V (0.85V with PCIe) before first DRAM access */
-	pmic_reg_write(p, BD71837_BUCK1_VOLT_RUN, 0x0c);
+	pmic_reg_write(p, BD71837_BUCK1_VOLT_RUN, pcie_active ? 0x0f : 0x0c);
 
 	/* increase VDD_DRAM to 0.975V for 3Ghz DDR (0.95V is desired, 0.975V is the closest available setting) */
 	pmic_reg_write(p, BD71837_BUCK5_VOLT, 0x83);
@@ -384,11 +402,19 @@ void board_init_f(ulong dummy)
 		printf("Error reading GPIO expander, assuming 1 GB RAM configuration.\n");
 	} else {
 		has2gb = (board_cfg & 0x01) == 0;
+
+		if ((board_cfg & BOARD_CFG_PCIE_M2) != 0) {
+			int gpio = get_M2_gpio_input();
+			if (gpio >= 0 && (gpio & 0x80) == 0) {
+				/* M.2 present => PCIe: increase VDD_SOC according to datasheet */
+				pcie_active = 1;
+			}
+		}
 	}
 
 
 	/* PMIC initialization */
-	vspv3_power_init();
+	vspv3_power_init(pcie_active);
 
 
 	/* DDR initialization */
