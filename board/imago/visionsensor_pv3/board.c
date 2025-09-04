@@ -222,7 +222,10 @@ static int setup_pcie(void *fdt)
 	else
 		tca7408_set_output(0x00);
 
-	return fdt_find_and_setprop_string(fdt, "/hsio/pcie@33800000", "status", fdt_val);
+	if (fdt_path_offset(fdt, "/hsio/pcie@33800000") >= 0)
+		return fdt_find_and_setprop_string(fdt, "/hsio/pcie@33800000", "status", fdt_val);
+	else
+		return fdt_find_and_setprop_string(fdt, "/soc@0/pcie@33800000", "status", fdt_val);
 }
 
 static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_settle)
@@ -272,8 +275,15 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		const char *path;
 		int offs, ret;
 
-		fdt_find_and_setprop_string(fdt, "/ecspi@30830000/imago-fpga@0", "status", "disabled");
-		fdt_find_and_setprop_string(fdt, "/usb@32e40000", "status", "okay");
+		if (fdt_path_offset(fdt, "/ecspi@30830000/imago-fpga@0") >= 0)
+			fdt_find_and_setprop_string(fdt, "/ecspi@30830000/imago-fpga@0", "status", "disabled");
+		else
+			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30800000/spba-bus@30800000/spi@30830000/imago-fpga@0", "status", "disabled");
+
+		if (fdt_path_offset(fdt, "/usb@32e40000") >= 0)
+			fdt_find_and_setprop_string(fdt, "/usb@32e40000", "status", "okay");
+		else
+			fdt_find_and_setprop_string(fdt, "/soc@0/bus@32c00000/usb@32e40000", "status", "okay");
 
 		setup_mipi_csi(fdt, 4, 8);
 
@@ -295,10 +305,17 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		fdt_find_and_setprop_string(fdt, "/gpu@38000000", "status", "disabled");
 
 		// enable RTC
-		fdt_find_and_setprop_string(fdt, "/i2c@30a50000/rv8263@51", "status", "okay");
+		if (fdt_path_offset(fdt, "/i2c@30a50000/rv8263@51") >= 0)
+			fdt_find_and_setprop_string(fdt, "/i2c@30a50000/rv8263@51", "status", "okay");
+		else
+			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30800000/i2c@30a50000/rv8263@51", "status", "okay");
 
 		// enable temperature sensor and thermal zones
-		fdt_find_and_setprop_string(fdt, "/tmu@30260000", "status", "okay");
+		if (fdt_path_offset(fdt, "/tmu@30260000") >= 0)
+			fdt_find_and_setprop_string(fdt, "/tmu@30260000", "status", "okay");
+		else
+			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30000000/tmu@30260000", "status", "okay");
+
 		fdt_find_and_setprop_string(fdt, "/thermal-zones/cpu-thermal", "status", "okay");
 
 		// configure mipi lanes
