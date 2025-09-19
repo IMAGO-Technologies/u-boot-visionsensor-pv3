@@ -27,6 +27,7 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#define GPIO1_5 IMX_GPIO_NR(1, 5)
 #define GPIO1_7 IMX_GPIO_NR(1, 7)
 #define GPIO1_8 IMX_GPIO_NR(1, 8)
 #define GPIO1_9 IMX_GPIO_NR(1, 9)
@@ -150,25 +151,11 @@ struct i2c_pads_info i2c_pad_info4 = {
 	},
 };
 
-#define USDHC2_CD_GPIO	IMX_GPIO_NR(2, 18)
 #define USDHC2_PWR_GPIO IMX_GPIO_NR(2, 19)
 
 #define USDHC_PAD_CTRL	(PAD_CTL_DSE6 | PAD_CTL_HYS | PAD_CTL_PUE |PAD_CTL_PE | \
 			 PAD_CTL_FSEL2)
 #define USDHC_GPIO_PAD_CTRL (PAD_CTL_HYS | PAD_CTL_DSE1)
-
-static iomux_v3_cfg_t const usdhc3_pads[] = {
-	IMX8MM_PAD_NAND_WE_B_USDHC3_CLK | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_WP_B_USDHC3_CMD | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_DATA04_USDHC3_DATA0 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_DATA05_USDHC3_DATA1 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_DATA06_USDHC3_DATA2 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_DATA07_USDHC3_DATA3 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_RE_B_USDHC3_DATA4 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_CE2_B_USDHC3_DATA5 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_CE3_B_USDHC3_DATA6 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-	IMX8MM_PAD_NAND_CLE_USDHC3_DATA7 | MUX_PAD_CTRL(USDHC_PAD_CTRL),
-};
 
 static iomux_v3_cfg_t const usdhc2_pads[] = {
 	IMX8MM_PAD_SD2_CLK_USDHC2_CLK | MUX_PAD_CTRL(USDHC_PAD_CTRL),
@@ -180,24 +167,13 @@ static iomux_v3_cfg_t const usdhc2_pads[] = {
 	IMX8MM_PAD_SD2_RESET_B_GPIO2_IO19 | MUX_PAD_CTRL(USDHC_GPIO_PAD_CTRL),
 };
 
-/*
- * The evk board uses DAT3 to detect CD card plugin,
- * in u-boot we mux the pin to GPIO when doing board_mmc_getcd.
- */
-static iomux_v3_cfg_t const usdhc2_cd_pad =
-	IMX8MM_PAD_SD2_DATA3_GPIO2_IO18 | MUX_PAD_CTRL(USDHC_GPIO_PAD_CTRL);
-
-static iomux_v3_cfg_t const usdhc2_dat3_pad =
-	IMX8MM_PAD_SD2_DATA3_USDHC2_DATA3 |
-	MUX_PAD_CTRL(USDHC_PAD_CTRL);
-
-
 static struct fsl_esdhc_cfg usdhc_cfg[2] = {
 	{USDHC2_BASE_ADDR, 0, 1},
-	{USDHC3_BASE_ADDR, 0, 1},
 };
 
  static iomux_v3_cfg_t const gpio_pads[] = {
+	IMX8MM_PAD_GPIO1_IO05_GPIO1_IO5 | MUX_PAD_CTRL(PAD_CTL_PUE | PAD_CTL_PE),
+	// board type 0...2
 	IMX8MM_PAD_GPIO1_IO07_GPIO1_IO7 | MUX_PAD_CTRL(PAD_CTL_PUE | PAD_CTL_PE),
 	IMX8MM_PAD_GPIO1_IO08_GPIO1_IO8 | MUX_PAD_CTRL(PAD_CTL_PE),
 	IMX8MM_PAD_GPIO1_IO09_GPIO1_IO9 | MUX_PAD_CTRL(PAD_CTL_PE),
@@ -205,69 +181,22 @@ static struct fsl_esdhc_cfg usdhc_cfg[2] = {
 
 int board_mmc_init(bd_t *bis)
 {
-	int i, ret;
-	/*
-	 * According to the board_mmc_init() the following map is done:
-	 * (U-Boot device node)    (Physical Port)
-	 * mmc0                    USDHC1
-	 * mmc1                    USDHC2
-	 */
-	for (i = 0; i < CONFIG_SYS_FSL_USDHC_NUM; i++) {
-		switch (i) {
-		case 0:
-			init_clk_usdhc(1);
-			usdhc_cfg[0].sdhc_clk = mxc_get_clock(MXC_ESDHC2_CLK);
-			imx_iomux_v3_setup_multiple_pads(
-				usdhc2_pads, ARRAY_SIZE(usdhc2_pads));
-			gpio_request(USDHC2_PWR_GPIO, "usdhc2_reset");
-			gpio_direction_output(USDHC2_PWR_GPIO, 0);
-			udelay(500);
-			gpio_direction_output(USDHC2_PWR_GPIO, 1);
-			break;
-		case 1:
-			init_clk_usdhc(2);
-			usdhc_cfg[1].sdhc_clk = mxc_get_clock(MXC_ESDHC3_CLK);
-			imx_iomux_v3_setup_multiple_pads(
-				usdhc3_pads, ARRAY_SIZE(usdhc3_pads));
-			break;
-		default:
-			printf("Warning: you configured more USDHC controllers"
-				"(%d) than supported by the board\n", i + 1);
-			return -EINVAL;
-		}
+	init_clk_usdhc(1);
+	usdhc_cfg[0].sdhc_clk = mxc_get_clock(MXC_ESDHC2_CLK);
+	imx_iomux_v3_setup_multiple_pads(
+		usdhc2_pads, ARRAY_SIZE(usdhc2_pads));
+	gpio_request(USDHC2_PWR_GPIO, "usdhc2_reset");
+	gpio_direction_output(USDHC2_PWR_GPIO, 0);
+	udelay(3000);
+	gpio_direction_output(USDHC2_PWR_GPIO, 1);
+	udelay(3000);
 
-		ret = fsl_esdhc_initialize(bis, &usdhc_cfg[i]);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
+	return fsl_esdhc_initialize(bis, &usdhc_cfg[0]);
 }
 
 int board_mmc_getcd(struct mmc *mmc)
 {
-	struct fsl_esdhc_cfg *cfg = (struct fsl_esdhc_cfg *)mmc->priv;
-	int ret = 0;
-
-	switch (cfg->esdhc_base) {
-	case USDHC3_BASE_ADDR:
-		ret = 1;
-		break;
-	case USDHC2_BASE_ADDR:
-		imx_iomux_v3_setup_pad(usdhc2_cd_pad);
-		gpio_request(USDHC2_CD_GPIO, "usdhc2 cd");
-		gpio_direction_input(USDHC2_CD_GPIO);
-
-		/*
-		 * Since it is the DAT3 pin, this pin is pulled to
-		 * low voltage if no card
-		 */
-		ret = gpio_get_value(USDHC2_CD_GPIO);
-
-		imx_iomux_v3_setup_pad(usdhc2_dat3_pad);
-		return ret;
-	}
-
+	// non-removable
 	return 1;
 }
 
@@ -391,6 +320,18 @@ void board_init_f(ulong dummy)
 		case BOARD_TYPE_VSPV3_IMX296:
 			printf("Board: LK1229\n");
 			board_cfg = BOARD_CFG_2GB;
+			break;
+		case BOARD_TYPE_VSPV3_IMX568:
+			printf("Board: LK1252\n");
+			board_cfg = get_board_config();
+			// disable internal LEDs, they are activated in user space
+			gpio_direction_output(GPIO1_5, 1);
+			break;
+		case BOARD_TYPE_VSPV3_LK1254:
+			printf("Board: LK1254\n");
+			board_cfg = BOARD_CFG_2GB;
+			// disable internal LEDs, they are activated in user space
+			gpio_direction_output(GPIO1_5, 1);
 			break;
 		default:
 			printf("Board: unknown (%d)\n", board_type);

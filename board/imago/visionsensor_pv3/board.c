@@ -260,6 +260,7 @@ static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_set
 int ft_board_setup(void *fdt, bd_t *bd)
 {
 	struct BloblistInfo *pBloblistInfo;
+	bool tmu_enable = false;
 
 	/* get bloblist stored by SPL */
 	pBloblistInfo = bloblist_find(4711, sizeof(*pBloblistInfo));
@@ -310,16 +311,42 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		else
 			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30800000/i2c@30a50000/rv8263@51", "status", "okay");
 
+		tmu_enable = true;
+
+		// configure mipi lanes
+		setup_mipi_csi(fdt, 1, 26);
+	} else if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_IMX568) {
+		setup_mipi_csi(fdt, 4, 26);
+		tmu_enable = true;
+	} else if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_LK1254) {
+		unsigned char sensor_type = 0xff;
+
+		tmu_enable = true;
+
+		eeprom_init(CONFIG_SYS_I2C_EEPROM_BUS);
+
+		if (eeprom_read(0x50, 0x20, &sensor_type, 1))
+			printf("Error reading sensor type from EEPROM!\n");
+		
+		if (sensor_type == 0xff) {
+			printf("Sensor type is missing in EEPROM.\n");
+			setup_mipi_csi(fdt, 4, 26);
+		}
+
+		if (sensor_type >= 0x8 && sensor_type <= 0xb)	// IMX900, IMX568
+			setup_mipi_csi(fdt, 4, 26);
+		else
+			printf("Unknown sensor type in EEPROM: 0x%02x\n", sensor_type);
+	}
+
+	if (tmu_enable)
+	{
 		// enable temperature sensor and thermal zones
 		if (fdt_path_offset(fdt, "/tmu@30260000") >= 0)
 			fdt_find_and_setprop_string(fdt, "/tmu@30260000", "status", "okay");
 		else
 			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30000000/tmu@30260000", "status", "okay");
-
 		fdt_find_and_setprop_string(fdt, "/thermal-zones/cpu-thermal", "status", "okay");
-
-		// configure mipi lanes
-		setup_mipi_csi(fdt, 1, 26);
 	}
 
 	return 0;
