@@ -89,6 +89,23 @@ int dram_init_banksize(void)
 	return 0;
 }
 
+static int board_eeprom_read(int board_type, unsigned int offset, uchar *buffer, unsigned int len)
+{
+	struct udevice *dev;
+	int ret = i2c_get_chip_for_busnum(CONFIG_SYS_I2C_EEPROM_BUS, CONFIG_SYS_I2C_EEPROM_ADDR, board_type == BOARD_TYPE_VSPV3_LK1254 ? 1 : 2, &dev);
+	if (ret) {
+		printf("%s: Cannot find I2C device for a bus 3\n", __func__);
+		return -1;
+	}
+
+	if (dm_i2c_read(dev, offset, buffer, len)) {
+		printf("Error reading EEPROM content!\n");
+		return -1;
+	}
+
+	return 0;
+}
+
 static int tca7408_init(void)
 {
 	const unsigned char chip_addr = 0x44;
@@ -98,7 +115,7 @@ static int tca7408_init(void)
 
 	ret = i2c_get_chip_for_busnum(3, chip_addr, 1, &dev);
 	if (ret) {
-		printf("%s: Cannot find udev for a bus 3\n", __func__);
+		printf("%s: Cannot find I2C device for a bus 3\n", __func__);
 		return -1;
 	}
 
@@ -177,9 +194,22 @@ static int tca7408_set_output(unsigned char value)
 }
 
 
+static int fdt_find_and_setprop_u32(void *fdt, const char *node, const char *prop, uint32_t val)
+{
+	fdt32_t tmp = cpu_to_fdt32(val);
+	int ret = fdt_find_and_setprop(fdt, node, prop, &tmp, sizeof(tmp), 0);
+
+	if (ret < 0)
+		printf("   dtb: error setting property %s/%s = \"%u\"\n", node, prop, val);
+	else
+		printf("   dtb: setting property %s/%s = \"%u\"\n", node, prop, val);
+
+	return ret;
+}
+
 static int fdt_find_and_setprop_string(void *fdt, const char *node, const char *prop, const char *val)
 {
-	int ret = fdt_find_and_setprop(fdt, node, prop, val, strlen(val)+1, 1);
+	int ret = fdt_find_and_setprop(fdt, node, prop, val, strlen(val)+1, 0);
 
 	if (ret < 0)
 		printf("   dtb: error setting property %s/%s = \"%s\"\n", node, prop, val);
@@ -240,18 +270,13 @@ static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_set
 		return offs;
 	}
 
-	ret = fdt_setprop_u32(fdt, offs, "data-lanes", lanes);
-	if (ret < 0) {
-		printf("%s(): fdt_setprop_u32(): %s\n", __func__, fdt_strerror(ret));
+	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "data-lanes", lanes);
+	if (ret)
 		return ret;
-	}
-	ret = fdt_setprop_u32(fdt, offs, "csis-hs-settle", clk_hs_settle);
-	if (ret < 0) {
-		printf("%s(): fdt_setprop_u32(): %s\n", __func__, fdt_strerror(ret));
+	
+	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "csis-hs-settle", clk_hs_settle);
+	if (ret)
 		return ret;
-	}
-
-	printf("   MIPI CSI: %u lanes, clk_hs_settle = %u.\n", lanes, clk_hs_settle);
 
 	return 0;
 }
@@ -323,20 +348,31 @@ int ft_board_setup(void *fdt, bd_t *bd)
 
 		tmu_enable = true;
 
-		eeprom_init(CONFIG_SYS_I2C_EEPROM_BUS);
+		board_eeprom_read(pBloblistInfo->board_type, 0x20, &sensor_type, 1);
 
-		if (eeprom_read(0x50, 0x20, &sensor_type, 1))
-			printf("Error reading sensor type from EEPROM!\n");
-		
 		if (sensor_type == 0xff) {
 			printf("Sensor type is missing in EEPROM.\n");
-			setup_mipi_csi(fdt, 4, 26);
+#if 1	// there is one valid settings right now
 		}
-
-		if (sensor_type >= 0x8 && sensor_type <= 0xb)	// IMX900, IMX568
-			setup_mipi_csi(fdt, 4, 26);
-		else
-			printf("Unknown sensor type in EEPROM: 0x%02x\n", sensor_type);
+		setup_mipi_csi(fdt, 4, 26);
+#else
+			setup_mipi_csi(fdt, 4, 26);	// set default
+		} else {
+			if (sensor_type >= 0x8 && sensor_type <= 0xb)	// IMX900, IMX568
+				setup_mipi_csi(fdt, 4, 26);
+			else
+				printf("Unknown sensor type in EEPROM: 0x%02x\n", sensor_type);
+		}
+#endif
+		
+		// update device tree for 1k EEPROM instead of 128k
+		if (fdt_path_offset(fdt, "/i2c@30a50000/at24@50") >= 0) {
+			fdt_find_and_setprop_string(fdt, "/i2c@30a50000/at24@50", "compatible", "at24,24c01");
+			fdt_find_and_setprop_u32(fdt, "/i2c@30a50000/at24@50", "pagesize", 8);
+		} else {
+			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30800000/i2c@30a50000/at24@50", "compatible", "at24,24c01");
+			fdt_find_and_setprop_u32(fdt, "/soc@0/bus@30800000/i2c@30a50000/at24@50", "pagesize", 8);
+		}
 	}
 
 	if (tmu_enable)
@@ -434,20 +470,14 @@ int board_init(void)
 	return 0;
 }
 
-static void board_set_ethaddr(void)
+static void board_set_ethaddr(int board_type)
 {
 	uint8_t mac_addr[6];
 
-	eeprom_init(CONFIG_SYS_I2C_EEPROM_BUS);
-
-	if (eeprom_read(0x50, 68, mac_addr, 6))
-	{
-		printf("Error: Could not read EEPROM content!\n");
+	if (board_eeprom_read(board_type, 68, mac_addr, 6))
 		return;
-	}
 
-	if (is_valid_ethaddr(mac_addr))
-	{
+	if (is_valid_ethaddr(mac_addr)) {
 		char buf[7];
 		sprintf(buf, "%pM", mac_addr);
 		env_set("ethaddr", buf);
@@ -457,7 +487,6 @@ static void board_set_ethaddr(void)
 int board_late_init(void)
 {
 	struct BloblistInfo *pBloblistInfo;
-	board_set_ethaddr();
 
 	/* get bloblist stored by SPL */
 	pBloblistInfo = bloblist_find(4711, sizeof(*pBloblistInfo));
@@ -465,6 +494,8 @@ int board_late_init(void)
 		printf("Error reading bloblist info from SPL.\n");
 		return 0;
 	}
+
+	board_set_ethaddr(pBloblistInfo->board_type);
 
 	if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_JMS)
 	{

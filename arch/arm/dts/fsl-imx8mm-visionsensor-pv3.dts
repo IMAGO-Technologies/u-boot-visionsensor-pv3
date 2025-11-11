@@ -346,13 +346,6 @@
 	scl-gpios = <&gpio5 20 GPIO_ACTIVE_HIGH>;
 	sda-gpios = <&gpio5 21 GPIO_ACTIVE_HIGH>;
 	status = "okay";
-
-	eeprom@50 {
-		compatible = "atmel,24c128";
-		reg = <0x50>;
-		pagesize = <64>;
-		u-boot,i2c-offset-len = <2>;
-	};
 };
 
 /*&flexspi0 {
