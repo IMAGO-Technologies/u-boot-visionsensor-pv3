@@ -237,6 +237,11 @@ config TARGET_IMX943_ORANGEBOX
 	imply BOOTSTD_BOOTCOMMAND
 	imply BOOTSTD_FULL
 
+config TARGET_VISIONSENSOR_PV4
+	bool "visionsensor-pv4"
+	select IMX95
+	imply BOOTSTD_FULL
+
 endchoice
 
 source "board/freescale/imx91_evk/Kconfig"
@@ -253,6 +258,7 @@ source "board/freescale/imx95_frdm/Kconfig"
 source "board/toradex/verdin-imx95/Kconfig"
 source "board/freescale/imx94_evk/Kconfig"
 source "board/freescale/imx94_orangebox/Kconfig"
+source "board/imago/visionsensor_pv4/Kconfig"
 
 endif
 

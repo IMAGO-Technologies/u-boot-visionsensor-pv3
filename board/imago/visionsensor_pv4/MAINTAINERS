@@ -1,0 +1,6 @@
+i.MX95 VisionSensor PV4 BOARD
+M:	Ralf Goebel <ralf.geobel@imago-technologies.com>
+S:	Maintained
+F:	board/imago/visionsensor-pv4/
+F:	include/configs/visionsensor-pv4.h
+F:	configs/visionsensor-pv4_defconfig

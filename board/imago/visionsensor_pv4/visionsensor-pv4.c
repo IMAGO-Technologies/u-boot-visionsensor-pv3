@@ -1,0 +1,135 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Copyright 2025-2026 IMAGO Technologies GmbH
+ */
+
+#include <env_internal.h>
+#include <env.h>
+#include <init.h>
+#include <fdt_support.h>
+#include <asm/arch/clock.h>
+#include <usb.h>
+#include <dwc3-uboot.h>
+#include <linux/bitfield.h>
+#include <linux/bitops.h>
+#include <linux/delay.h>
+#include <asm/gpio.h>
+#include <power/regulator.h>
+#include <scmi_agent.h>
+#include "../dts/upstream/src/arm64/freescale/imx95-power.h"
+#include <asm/arch/sys_proto.h>
+#include <i2c.h>
+#include <dm/uclass.h>
+#include <dm/uclass-internal.h>
+
+extern int board_fix_fdt_fuse(void *fdt);
+
+int board_early_init_f(void)
+{
+	init_uart_clk(1);
+
+	return 0;
+}
+
+static int imx9_scmi_power_domain_enable(u32 domain, bool enable)
+{
+	struct udevice *dev;
+	int ret;
+
+	ret = uclass_get_device_by_name(UCLASS_CLK, "protocol@14", &dev);
+	if (ret)
+		return ret;
+
+	return scmi_pwd_state_set(dev, 0, domain, enable ? 0 : BIT(30));
+}
+
+enum env_location env_get_location(enum env_operation op, int prio)
+{
+	if (prio == 0)
+		return ENVL_FAT;
+	else
+		return ENVL_UNKNOWN;
+}
+
+int board_init(void)
+{
+	imx9_scmi_power_domain_enable(IMX95_PD_CAMERA, false);
+
+/*	imx9_scmi_power_domain_enable(IMX95_PD_HSIO_TOP, true);
+	pci_init(); */
+
+/*	power_on_m7("mx95evkrpmsg");*/
+
+	return 0;
+}
+
+int board_late_init(void)
+{
+	return 0;
+}
+
+#ifdef CONFIG_OF_BOARD_SETUP
+
+static int fdt_find_and_setprop_u32(void *fdt, const char *node, const char *prop, uint32_t val, int create)
+{
+	fdt32_t tmp = cpu_to_fdt32(val);
+	int ret = fdt_find_and_setprop(fdt, node, prop, &tmp, sizeof(tmp), create);
+
+	if (ret < 0)
+		printf("   dtb: error setting property %s/%s = \"%u\"\n", node, prop, val);
+	else
+		printf("   dtb: setting property %s/%s = \"%u\"\n", node, prop, val);
+
+	return ret;
+}
+
+static int fdt_find_and_setprop_string(void *fdt, const char *node, const char *prop, const char *val)
+{
+	int ret = fdt_find_and_setprop(fdt, node, prop, val, strlen(val)+1, 0);
+
+	if (ret < 0)
+		printf("   dtb: error setting property %s/%s = \"%s\"\n", node, prop, val);
+	else
+		printf("   dtb: setting property %s/%s = \"%s\"\n", node, prop, val);
+
+	return ret;
+}
+
+int ft_board_setup(void *blob, struct bd_info *bd)
+{
+	u32 rev_major = (get_cpu_rev() & 0x000F0) >> 4;
+
+	// update NEO ISP node for rev. A1
+	if (rev_major < 2)
+	{
+		fdt_find_and_setprop_string(blob, "/soc/isp@4ae00000", "compatible", "nxp,imx95-a0-neoisp");
+	}
+
+	return 0;
+}
+#endif
+
+#if 0
+void board_quiesce_devices(void)
+{
+	int ret;
+
+	ret = imx9_scmi_power_domain_enable(IMX95_PD_HSIO_TOP, false);
+	if (ret) {
+		printf("%s: Failed for HSIO MIX: %d\n", __func__, ret);
+		return;
+	}
+}
+#endif
+
+#if IS_ENABLED(CONFIG_OF_BOARD_FIXUP)
+
+int board_fix_fdt(void *fdt)
+{
+	/* Remove nodes based on fuses. */
+	board_fix_fdt_fuse(fdt);
+
+	return 0;
+}
+
+#endif

@@ -1,0 +1,12 @@
+if TARGET_VISIONSENSOR_PV4
+
+config SYS_BOARD
+	default "visionsensor_pv4"
+
+config SYS_VENDOR
+	default "imago"
+
+config SYS_CONFIG_NAME
+	default "visionsensor_pv4"
+
+endif
