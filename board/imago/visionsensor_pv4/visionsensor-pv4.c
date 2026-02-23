@@ -133,3 +133,60 @@ int board_fix_fdt(void *fdt)
 }
 
 #endif
+
+int scmi_misc_ddrinfo(u32 ddrc_id, struct scmi_ddr_info_out *out);
+
+int board_phys_sdram_size(phys_size_t *size)
+{
+	struct scmi_ddr_info_out ddr_info;
+	int ret;
+	u32 ddrc_id = 0, ddrc_num = 1;
+	phys_size_t start, end;
+	u32 rev_major = (get_cpu_rev() & 0x000F0) >> 4;
+
+	if (!size)
+		return -EINVAL;
+
+	*size = 0;
+	
+	// Rev. A1: the old System Manager doesn't support reading DDR info,
+	// but we know we have 8GB installed:
+	if (rev_major < 2)
+	{
+		// ~2GB + 6GB, PHYS_SDRAM_2_SIZE is not set to leave the default at 2GB:
+		*size = PHYS_SDRAM_SIZE + 0x180000000UL;
+		return 0;
+	}
+
+	do {
+		ret = scmi_misc_ddrinfo(ddrc_id++, &ddr_info);
+		if (ret) {
+			/* if get DDR info failed, fall to default config */
+			*size = PHYS_SDRAM_SIZE;
+#ifdef PHYS_SDRAM_2_SIZE
+			*size += PHYS_SDRAM_2_SIZE;
+#endif
+			return 0;
+		} else {
+			ddrc_num = ((ddr_info.attributes >> 16) & 0x3);
+			start = ddr_info.starthigh;
+			start <<= 32;
+			start += ddr_info.startlow;
+
+			end = ddr_info.endhigh;
+			end <<= 32;
+			end += ddr_info.endlow;
+
+			*size += end + 1 - start;
+
+			debug("ddr info attr 0x%x, start 0x%x 0x%x, end 0x%x 0x%x, mts %u\n",
+				ddr_info.attributes, ddr_info.starthigh, ddr_info.startlow,
+				ddr_info.endhigh, ddr_info.endlow, ddr_info.mts);
+		}
+	} while (ddrc_id < ddrc_num);
+
+	/* SM reports total DDR size, need remove secure memory */
+	*size -= PHYS_SDRAM - 0x80000000;
+
+	return 0;
+}

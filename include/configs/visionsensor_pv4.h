@@ -18,7 +18,6 @@
 
 #define PHYS_SDRAM_SIZE			0x70000000 /* 2GB - 256MB DDR */
 /*#define PHYS_SDRAM_2_SIZE 		0x180000000UL*/ /* 6GB */
-/*#define PHYS_SDRAM_2_SIZE		0*/
 
 #define CFG_SYS_SECURE_SDRAM_BASE	0x8A000000 /* Secure DDR region for A55, SPL could use first 2MB */
 #define CFG_SYS_SECURE_SDRAM_SIZE	0x06000000
