@@ -194,10 +194,10 @@ static int tca7408_set_output(unsigned char value)
 }
 
 
-static int fdt_find_and_setprop_u32(void *fdt, const char *node, const char *prop, uint32_t val)
+static int fdt_find_and_setprop_u32(void *fdt, const char *node, const char *prop, uint32_t val, int create)
 {
 	fdt32_t tmp = cpu_to_fdt32(val);
-	int ret = fdt_find_and_setprop(fdt, node, prop, &tmp, sizeof(tmp), 0);
+	int ret = fdt_find_and_setprop(fdt, node, prop, &tmp, sizeof(tmp), create);
 
 	if (ret < 0)
 		printf("   dtb: error setting property %s/%s = \"%u\"\n", node, prop, val);
@@ -270,11 +270,11 @@ static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_set
 		return offs;
 	}
 
-	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "data-lanes", lanes);
+	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "data-lanes", lanes, 0);
 	if (ret)
 		return ret;
 	
-	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "csis-hs-settle", clk_hs_settle);
+	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "csis-hs-settle", clk_hs_settle, 0);
 	if (ret)
 		return ret;
 
@@ -368,10 +368,10 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		// update device tree for 1k EEPROM instead of 128k
 		if (fdt_path_offset(fdt, "/i2c@30a50000/at24@50") >= 0) {
 			fdt_find_and_setprop_string(fdt, "/i2c@30a50000/at24@50", "compatible", "at24,24c01");
-			fdt_find_and_setprop_u32(fdt, "/i2c@30a50000/at24@50", "pagesize", 8);
+			fdt_find_and_setprop_u32(fdt, "/i2c@30a50000/at24@50", "pagesize", 8, 0);
 		} else {
 			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30800000/i2c@30a50000/at24@50", "compatible", "at24,24c01");
-			fdt_find_and_setprop_u32(fdt, "/soc@0/bus@30800000/i2c@30a50000/at24@50", "pagesize", 8);
+			fdt_find_and_setprop_u32(fdt, "/soc@0/bus@30800000/i2c@30a50000/at24@50", "pagesize", 8, 0);
 		}
 	}
 
@@ -383,6 +383,19 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		else
 			fdt_find_and_setprop_string(fdt, "/soc@0/bus@30000000/tmu@30260000", "status", "okay");
 		fdt_find_and_setprop_string(fdt, "/thermal-zones/cpu-thermal", "status", "okay");
+	}
+
+	{
+		unsigned char eeprom_val = 0;
+		board_eeprom_read(pBloblistInfo->board_type, 74, &eeprom_val, 1);
+		if (eeprom_val == 100)
+		{
+			if (fdt_path_offset(fdt, "/ethernet@30be0000/mdio/ethernet-phy@4") >= 0) {
+				fdt_find_and_setprop_u32(fdt, "/ethernet@30be0000/mdio/ethernet-phy@4", "max-speed", 100, 1);
+			} else {
+				fdt_find_and_setprop_u32(fdt, "/soc@0/bus@30800000/ethernet@30be0000/mdio/ethernet-phy@4", "max-speed", 100, 1);
+			}
+		}
 	}
 
 	return 0;
@@ -422,14 +435,19 @@ static int setup_fec(void)
 int board_phy_config(struct phy_device *phydev)
 {
 	unsigned short phy_id = phy_read(phydev, MDIO_DEVAD_NONE, 0x2);
+	int board_type = -1;
+	unsigned char eeprom_val = 0;
+
+	/* get bloblist stored by SPL */
+	struct BloblistInfo *pBloblistInfo = bloblist_find(4711, sizeof(*pBloblistInfo));
+	if (pBloblistInfo == NULL)
+		printf("board_phy_config(): error reading bloblist info from SPL.\n");
+	else
+		board_type = pBloblistInfo->board_type;
 	
 	if (phy_id == 0x283)	// ADIN1300
 	{
-		/* get bloblist stored by SPL */
-		struct BloblistInfo *pBloblistInfo = bloblist_find(4711, sizeof(*pBloblistInfo));
-		if (pBloblistInfo == NULL) {
-			printf("board_phy_config(): error reading bloblist info from SPL.\n");
-		} else if (pBloblistInfo->board_type != BOARD_TYPE_VSPV3_IMX296) {
+		if (board_type != BOARD_TYPE_VSPV3_IMX296) {
 			// LED_0 configuration: blink on activity
 			phy_write(phydev, MDIO_DEVAD_NONE, 0x1b, 0x0401);	// LED_CTRL_1.LED_A_EXT_CFG_EN = 1
 			phy_write(phydev, MDIO_DEVAD_NONE, 0x1c, 0x2109);	// LED_CTRL_2.LED_A_CFG = 0x9
@@ -453,8 +471,17 @@ int board_phy_config(struct phy_device *phydev)
 		phy_write(phydev, MDIO_DEVAD_NONE, 0x19, 0x2000);
 	}
 
+	board_eeprom_read(board_type, 74, &eeprom_val, 1);
+	if (eeprom_val == 100)
+	{
+		printf("PHY: disabling 1000M advertisement.\n");
+		phydev->supported &= ~PHY_1000BT_FEATURES;
+		phydev->advertising &= ~PHY_1000BT_FEATURES;
+	}
+
 	if (phydev->drv->config)
 		phydev->drv->config(phydev);
+
 	return 0;
 }
 #endif
