@@ -260,21 +260,20 @@ static int setup_pcie(void *fdt)
 
 static int setup_mipi_csi(void *fdt, unsigned int lanes, unsigned int clk_hs_settle)
 {
-	const char *path;
+	const char *path = "/mipi_csi@32e30000/port/endpoint@1";
 	int offs, ret;
 
-	path = "/mipi_csi@32e30000/port/endpoint@1";
 	offs = fdt_path_offset(fdt, path);
 	if (offs < 0) {
 		printf("%s(): node %s not found.\n", __func__, path);
 		return offs;
 	}
 
-	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "data-lanes", lanes, 0);
+	ret = fdt_find_and_setprop_u32(fdt, path, "data-lanes", lanes, 0);
 	if (ret)
 		return ret;
 	
-	ret = fdt_find_and_setprop_u32(fdt, "/mipi_csi@32e30000/port/endpoint@1", "csis-hs-settle", clk_hs_settle, 0);
+	ret = fdt_find_and_setprop_u32(fdt, path, "csis-hs-settle", clk_hs_settle, 0);
 	if (ret)
 		return ret;
 
@@ -345,25 +344,25 @@ int ft_board_setup(void *fdt, bd_t *bd)
 		tmu_enable = true;
 	} else if (pBloblistInfo->board_type == BOARD_TYPE_VSPV3_LK1254) {
 		unsigned char sensor_type = 0xff;
+		unsigned char mipi_lanes = 0xff;
+		unsigned char hssettle = 0xff;
 
 		tmu_enable = true;
 
 		board_eeprom_read(pBloblistInfo->board_type, 0x20, &sensor_type, 1);
+		board_eeprom_read(pBloblistInfo->board_type, 0x21, &mipi_lanes, 1);
+		board_eeprom_read(pBloblistInfo->board_type, 0x22, &hssettle, 1);
 
-		if (sensor_type == 0xff) {
+		if (sensor_type == 0xff)
 			printf("Sensor type is missing in EEPROM.\n");
-#if 1	// there is one valid settings right now
-		}
-		setup_mipi_csi(fdt, 4, 26);
-#else
-			setup_mipi_csi(fdt, 4, 26);	// set default
-		} else {
-			if (sensor_type >= 0x8 && sensor_type <= 0xb)	// IMX900, IMX568
-				setup_mipi_csi(fdt, 4, 26);
-			else
-				printf("Unknown sensor type in EEPROM: 0x%02x\n", sensor_type);
-		}
-#endif
+
+		// defaults are valid for IMX568 and IMX900
+		if (mipi_lanes == 0xff)
+			mipi_lanes = 4;
+		if (hssettle == 0xff)
+			hssettle = 26;
+
+		setup_mipi_csi(fdt, mipi_lanes, hssettle);
 		
 		// update device tree for 1k EEPROM instead of 128k
 		if (fdt_path_offset(fdt, "/i2c@30a50000/at24@50") >= 0) {
