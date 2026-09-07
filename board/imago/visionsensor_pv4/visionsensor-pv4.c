@@ -70,6 +70,7 @@ int board_late_init(void)
 
 #ifdef CONFIG_OF_BOARD_SETUP
 
+/*
 static int fdt_find_and_setprop_u32(void *fdt, const char *node, const char *prop, uint32_t val, int create)
 {
 	fdt32_t tmp = cpu_to_fdt32(val);
@@ -82,6 +83,7 @@ static int fdt_find_and_setprop_u32(void *fdt, const char *node, const char *pro
 
 	return ret;
 }
+*/
 
 static int fdt_find_and_setprop_string(void *fdt, const char *node, const char *prop, const char *val)
 {
@@ -98,11 +100,46 @@ static int fdt_find_and_setprop_string(void *fdt, const char *node, const char *
 int ft_board_setup(void *blob, struct bd_info *bd)
 {
 	u32 rev_major = (get_cpu_rev() & 0x000F0) >> 4;
+	int ret = 0;
+	u64 reg[2];
 
 	// update NEO ISP node for rev. A1
 	if (rev_major < 2)
-	{
 		fdt_find_and_setprop_string(blob, "/soc/isp@4ae00000", "compatible", "nxp,imx95-a0-neoisp");
+
+	// reserve memory for Neutron NPU
+	if (gd->ram_size > 0x100000000ull) {
+		// 8 GB RAM
+		reg[0] = 0x100000000ull;
+		reg[1] = 0x100000000ull;	// 4 GB
+	}
+	else if (gd->ram_size > 0x80000000ull) {
+		// 4 GB RAM
+		reg[0] = 0x100000000ull;
+		reg[1] = 0x80000000ull;		// 2 GB
+	}
+	else {
+		// 2 GB RAM
+		// reduce CMA space to 256 MB
+		reg[0] = 0x10000000;
+		printf("   dtb: reserve %u MB for linux,cma\n", (unsigned int)(reg[0] >> 20));
+		reg[0] = cpu_to_fdt64(reg[0]);
+		fdt_find_and_setprop(blob, "/reserved-memory/linux,cma", "size", &reg[0], sizeof(reg[0]), false);
+
+		reg[0] = 0xD0000000ull;
+		reg[1] = 0x30000000ull;		// 768 MB
+	}
+	printf("   dtb: reserve %u MB for Neutron NPU\n", (unsigned int)(reg[1] >> 20));
+
+	reg[0] = cpu_to_fdt64(reg[0]);
+	reg[1] = cpu_to_fdt64(reg[1]);
+	ret = fdt_find_and_setprop(blob, "/reserved-memory/neutron_memory@100000000", "reg", reg, sizeof(reg), false);
+	if (ret < 0)
+	{
+		// new device tree using dynamically alocated block
+		ret = fdt_find_and_setprop(blob, "/reserved-memory/neutron_memory", "size", &reg[1], sizeof(reg[1]), false);
+		if (ret < 0)
+			printf("   dtb: error setting property /reserved-memory/neutron_memory\n");
 	}
 
 	return 0;
